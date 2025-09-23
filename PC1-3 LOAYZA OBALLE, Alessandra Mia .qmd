@@ -1,0 +1,182 @@
+---
+title: "PC1_3: Anàlisis de datos de cirrosis"
+author:LOAYZA OBALLE, Alessandra Mìa
+format: html
+---
+
+# 1 Importar de datos
+
+primero se importa la base de datos `data_cirrosis.csv` usando la funciòn `read_csv()`, que pertenece al paquete `readr` . Esta funciòn es preferible a `read.csv()` por que detcta los tipos de variables de manera eficiente.
+
+```{r}
+# install.packages("finalfit")
+# install.packages("flextable")
+# install.packages("gtsummary")
+# install.packages("tableone")
+```
+
+```{r}
+#install.packages("tableone")
+```
+
+```{r}
+library(tidyverse)
+library(here)
+library(rio)
+library(gtsummary) ## Para la "Tabla 1"
+library(finalfit) ## Para recodificar
+library(flextable) ## Para exportar tablas
+library(tableone)
+```
+
+```{r}
+library(knitr)
+```
+
+```{r}
+library(readr)
+data_cirrosis<- read_csv("~/data/cirrosis.csv")
+View(cirrosis)
+
+```
+
+```{r}
+head(data_cirrosis)
+```
+
+# 2 Limpieza y reparaciòn
+
+Es importante revisar los tipos de datos y convertir las variables categòricas en factores para facilitar los anàlisis estadìsticos, tambien se identifican valores perdidos para decidir como tratarlos.
+
+Estructura de la base
+
+```{r}
+glimpse(data_cirrosis)
+```
+
+-\> Conversiòn de variables a factor
+
+```{r}
+data_cirrosis <- data_cirrosis%>%mutate(
+  Sexo = factor(Sexo),
+  Estado = factor(Estado),
+  Medicamento = factor(Medicamento)
+)
+```
+
+-\> Comprobar datos faltantes
+
+```{r}
+colSums(is.na(data_cirrosis))
+```
+
+## 3.Analisis descriptivo
+
+Se calculan estadìsticos descriptivos para resumir la informaciòn de la poblaciòn estudiada, esto incluye medidas, desviaciones estàndar y frecuencias segùn el tipo de variable.
+
+Esta tabla es conocida como la " Tabla 1 ".
+
+-\> Resumen general
+
+```{r}
+summary(data_cirrosis)
+```
+
+-\> Estadìsticos por sexo de algunas variables clìnicas
+
+```{r}
+data_cirrosis%>%
+  group_by(Sexo) %>%
+  summarise(
+    Edad_media = mean(Edad, na.rm = TRUE), Bilirrubina_media = mean(Bilirrubina, na.rm = TRUE), Albumina_media = mean(Albumina, na.rm = TRUE)
+  )
+```
+
+# 4. Pruebas inferenciales
+
+Para determinar si existen diferencias significativas entre grupos, se realizan pruebas de hipotesis, por ejemplo, una prueba t de Student para comparar los niveles para evaluar la relaciòn entre el tipo de medicamento y estado del paciente.
+
+-\>t_test: Bilirrubina segun sexo
+
+```{r}
+t.test(Bilirrubina ~ Sexo, data = data_cirrosis)
+```
+
+-\>Chi-cuadrado : Medicamento vs Estado
+
+```{r}
+chisq.test(table(data_cirrosis$Medicamento, data_cirrosis$Estado))
+```
+
+# 5. Modelo predictivo
+
+Se construye un modelo de regresiòn lineal para explorar sdi la albumina y la edad puede predecir los niveles de bilirrubina, este ejemplo ilustra como aplicar modelos estadìsticos simples a datos clìnicos.
+
+```{r}
+modelo <- lm(Bilirrubina ~ Albumina + Edad, data = data_cirrosis)
+summary(modelo)
+```
+
+# 6. Visualizaciòn:
+
+Los gràficos facilitan la compresiòn de las distribuciones y relaciones entre variables, a continuaciòn se muestra un ejemplo para comparar bilirrubina segun sexo.
+
+```{r}
+ggplot(data_cirrosis, aes(x = Sexo, y = Bilirrubina, fill = Sexo)) +
+  geom_boxplot()+
+  labs(tittle = "Distribuciòn de Bilirrubina por Sexo")
+```
+
+TABLA
+
+-\> Se selecciona variables de interès
+
+```{r}
+vars <- c("Edad", "Bilirrubina", "Albumina", "Tiempo_Protrombina", "Sexo", "Estado", "Medicamento")
+```
+
+-\> Crear la tabla 1:
+
+```{r}
+tabla1 <- data.frame(
+  Variable = c("Edad", "Albumina"),
+  Media    = c(mean(data_cirrosis$Edad, na.rm = TRUE),
+               mean(data_cirrosis$Albumina, na.rm = TRUE)),
+  SD       = c(sd(data_cirrosis$Edad, na.rm = TRUE),
+               sd(data_cirrosis$Albumina, na.rm = TRUE))
+)
+print(tabla1)
+```
+
+```{r}
+tabla1 <- data_cirrosis %>%
+  summarise(
+    Edad_media      = mean(Edad, na.rm = TRUE),
+    Edad_sd         = sd(Edad, na.rm = TRUE),
+    Albumina_media  = mean(Albumina, na.rm = TRUE),
+    Albumina_sd     = sd(Albumina, na.rm = TRUE)
+  )
+
+```
+
+```{r}
+Sexo_tabla <- data_cirrosis %>%
+  count(Sexo) %>%
+  mutate(porcentaje = round(100 * n / sum(n), 1))
+print(tabla1)
+print(Sexo_tabla)
+```
+
+## 7. Conclusiones:
+
+El anàlisis de la base de datos de pacientes con cirrosis nos permitio describir sus caracterìsticas clìnicas principales, como la edad, los niveles de bilirrubina y àlbumina, asi como la distribuciòn por sexo y tratamiento, se identificaron diferencias en los valores de bilirrubina segun sexo y se analiso la relaciòn entre el tipo de medicamento y el estado final de los pacientes para asi hallar asociaciones que pueden ser utiles al momento del seguimiento clìnico, ademas el modelo de regresion nos mostro que variables como la albùmina y la edad influyen en los niveles de bilirrubina , lo que nos ofrece una informaciòn para el pronòstico y tod el proceso se documento en Quarto para asi garantizar la reproductibilidad de los resultados y facilitar su aplicaciòn en futuros estudios mèdicos.
+
+## 
+
+# 
+
+# 
+
+# 
+
+## 
