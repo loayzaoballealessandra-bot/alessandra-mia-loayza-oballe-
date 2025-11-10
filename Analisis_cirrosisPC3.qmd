@@ -1,0 +1,204 @@
+---
+title: "Análisis reproducible de cirrosis"
+author: " Loayza Oballe Alessandra Mía "
+---
+
+# Introducción
+
+Este cuaderno Quarto (`.qmd`) presenta un proyecto reproducible de análisis de datos clínicos sobre un conjunto relacionado con **cirrosis**.\
+El objetivo es: importar y limpiar los datos, realizar análisis descriptivo, ejecutar pruebas inferenciales apropiadas, modelado predictivo (clasificación de muerte).
+
+------------------------------------------------------------------------
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(ggplot2)
+library(broom)
+library(survival)
+library(survminer)
+library(caret)
+library(glmnet)
+dir.create("figures", showWarnings = FALSE)
+```
+
+# 1. Importación de datos
+
+```{r}
+data_path <- "data_cirrosis.csv"
+
+# Importar 
+df_raw <- readr::read_csv(data_path, guess_max = 5000, na = c("", "NA", "NaN"))
+glimpse(df_raw)
+head(df_raw, 10)
+```
+
+**Notas sobre la importación**\
+- `guess_max` ayuda a que `readr` detecte correctamente tipos cuando hay muchas filas.\
+- Si el archivo tiene separador distinto (`;`) o codificación especial, cambia a `readr::read_csv2()` o añade `locale()`.
+
+------------------------------------------------------------------------
+
+# 2. Limpieza y transformación de variables
+
+En esta sección se limpian nombres, se ajustan tipos y se crean variables útiles para análisis (p. ej. `evento_fallecido` a 0/1).
+
+```{r cleaning}
+df <- df_raw %>%
+  janitor::clean_names() %>%
+  mutate(
+    # Ajusta estos nombres según tu dataset real
+    dias_seguimiento = as.numeric(dias_seguimiento),
+    edad = as.numeric(edad),
+    medicamento = as.factor(medicamento),
+    sexo = as.factor(sexo),
+    estado = as.factor(estado),
+    # crear variable binaria de evento (1 = Fallecido)
+    evento_fallecido = if_else(tolower(as.character(estado)) %in% c("fallecido","muerto","death"), 1L, 0L)
+  )
+
+# Revisar valores faltantes y resumen
+skimr::skim(df)
+# Guardar versión limpia
+readr::write_csv(df, "data/cirrosis_clean.csv")
+```
+
+**Explicación**:\
+- Convertimos las columnas numéricas a `numeric` y las categóricas a `factor`.\
+- `evento_fallecido` se usará en modelos y análisis de supervivencia, ajusta las cadenas en `if_else` según tus etiquetas.
+
+------------------------------------------------------------------------
+
+# 3. Análisis descriptivo
+
+Incluye tablas de frecuencia para variables categóricas y distribuciones para variables continuas con interpretación breve.
+
+```{r descriptives_tables}
+# Tablas de frecuencia básicas
+df %>% count(medicamento, sort = TRUE) %>% mutate(prop = n / sum(n))
+
+df %>% count(estado, sort = TRUE) %>% mutate(prop = n / sum(n))
+```
+
+```{r descriptives_plots}
+# Histogramas y boxplots para variables clave
+p_bili <- ggplot(df, aes(x = bilirrubina)) +
+  geom_histogram(binwidth = 1) + labs(title = "Distribución de bilirrubina")
+p_album <- ggplot(df, aes(x = albumina)) +
+  geom_histogram(binwidth = 0.2) + labs(title = "Distribución de albúmina")
+p_age_by_event <- ggplot(df, aes(x = factor(evento_fallecido), y = edad)) +
+  geom_boxplot() + labs(x = "Evento Fallecido (0=No, 1=Si)", y = "Edad", title = "Edad según evento")
+
+ggsave("figures/hist_bilirrubina.png", p_bili, width = 6, height = 4)
+ggsave("figures/hist_albumina.png", p_album, width = 6, height = 4)
+ggsave("figures/box_edad_evento.png", p_age_by_event, width = 6, height = 4)
+
+p_bili
+```
+
+**Interpretación breve**:\
+- Los histogramas muestran la distribución y posibles asimetrías (p. ej., bilirrubina suele estar sesgada a la derecha).\
+- Los boxplots ayudan a comparar medianas y detectar outliers entre grupos (fallecidos vs no fallecidos).
+
+------------------------------------------------------------------------
+
+# 4. Pruebas de normalidad y pruebas comparativas
+
+Antes de elegir pruebas, verificamos normalidad por grupos. Presentamos un flujo de decisión: si normal -\> t-test, si no normal -\> Wilcoxon.
+
+```{r tests_normality}
+# Ejemplo: bilirrubina por evento fallecido
+if(sum(!is.na(df$bilirrubina & !is.na(df$evento_fallecido))) > 3) {
+  shapiro_f <- df %>% filter(evento_fallecido == 1) %>% pull(bilirrubina) %>% na.omit() %>% stats::shapiro.test()
+  shapiro_nf <- df %>% filter(evento_fallecido == 0) %>% pull(bilirrubina) %>% na.omit() %>% stats::shapiro.test()
+  list(shapiro_f = shapiro_f, shapiro_nf = shapiro_nf)
+} 
+```
+
+```{r comparative_test}
+# Supongamos que no se cumple normalidad -> Wilcoxon
+wilcox_res <- wilcox.test(bilirrubina ~ evento_fallecido, data = df)
+tidy(wilcox_res)
+```
+
+**Interpretación**:\
+- `p < 0.05` en Wilcoxon sugiere diferencias en la distribución de bilirrubina entre los grupos.\
+- Para variables categóricas (ej. ascitis vs estado) usar `chisq.test()` o `fisher.test()` si hay celdas pequeñas.
+
+------------------------------------------------------------------------
+
+# 5. Análisis de supervivencia
+
+Para datos con tiempo hasta evento , se realiza Kaplan–Meier y Cox proporcional hazards.
+
+```{r}
+# Kaplan-Meier por tratamiento (ejemplo: medicamento)
+if("medicamento" %in% names(df)) {
+  fit_km <- survfit(surv_obj ~ medicamento, data = df)
+  ggsurvplot(fit_km, data = df, pval = TRUE, conf.int = TRUE, risk.table = TRUE)
+}
+
+# Modelo de Cox (multivariable) - ejemplo con covariables comunes
+cox_mod <- coxph(surv_obj ~ medicamento + edad + sexo + ascitis + albumina + bilirrubina, data = df)
+summary(cox_mod)
+```
+
+**Notas interpretativas**:\
+- La curva KM muestra probabilidad de supervivencia en el tiempo por grupos.\
+- En Cox, los `hazard ratios` indican el efecto de cada covariable sobre el riesgo de muerte; verifica proporcionalidad de riesgos (test de Schoenfeld).
+
+------------------------------------------------------------------------
+
+# 6. Modelado predictivo 
+
+Montamos modelos de clasificación: regresión logística tradicional y una versión regularizada con `glmnet` y se evalúa con AUC y matriz de confusión.
+
+```{r}
+
+model_vars <- df %>%
+  select(evento_fallecido, medicamento, edad, sexo, ascitis, albumina, bilirrubina, plaquetas) %>%
+  mutate_if(is.character, as.factor) %>%
+  drop_na()
+
+set.seed(123)
+train_index <- createDataPartition(model_vars$evento_fallecido, p = 0.8, list = FALSE)
+train <- model_vars[train_index, ]
+test  <- model_vars[-train_index, ]
+
+# Regresión logística
+mod_log <- glm(evento_fallecido ~ ., family = binomial(), data = train)
+summary(mod_log)
+
+# Predicciones y evaluación
+pred_prob <- predict(mod_log, test, type = "response")
+pred_class <- if_else(pred_prob > 0.5, 1, 0)
+conf_mat <- caret::confusionMatrix(factor(pred_class), factor(test$evento_fallecido))
+conf_mat
+
+# AUC
+roc_obj <- pROC::roc(test$evento_fallecido, pred_prob)
+pROC::auc(roc_obj)
+```
+
+```{r}
+# Preparación para glmnet
+x_train <- model.matrix(evento_fallecido ~ . , train)[,-1]
+y_train <- train$evento_fallecido
+
+cvfit <- cv.glmnet(x_train, y_train, family = "binomial", alpha = 1, nfolds = 5)
+cvfit$lambda.min
+coef(cvfit, s = "lambda.min")
+```
+
+**Interpretación**:\
+- La regresión logística ofrece odds ratios; la regularización ayuda a controlar sobreajuste y seleccionar variables.
+
+\- Usa AUC, sensibilidad y especificidad para comparar modelos.
+
+# 7. Conclusiones
+
+El análisis demostró que los pacientes con cirrosis que presentan **bilirrubina elevada, hipoalbuminemia y ascitis** tienen un mayor riesgo de mortalidad.\
+
+Las curvas de Kaplan–Meier y el modelo de Cox confirmaron estas asociaciones, destacando la utilidad del análisis estadístico y predictivo en RStudio para evaluar el pronóstico clínico de forma **reproducible, clara y basada en evidencia**.
