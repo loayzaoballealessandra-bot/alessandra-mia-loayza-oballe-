@@ -1,0 +1,105 @@
+---
+title: "Análisis de Regresión, Bondad de Ajuste y Curva ROC en Datos de Cirrosis"
+format:LOAYZA OBALLE Alessandra Mía
+---
+
+```{r}
+library(tidyverse)
+library(car)
+library(nortest)
+library(ggfortify)
+library(psych)
+library(pROC)
+library(ggplot2)
+```
+
+# Introducción
+
+Este documento presenta un análisis completo aplicando regresión lineal, regresión logística, pruebas de bondad de ajuste y la curva ROC en datos de cirrosis hepática, el objetivo es evaluar cómo diferentes variables clínicas se relacionan con marcadores de función hepática y con la probabilidad de fallecimiento, proporcionando una visión integral del comportamiento de los datos y la capacidad predictiva de los modelos.
+
+# Carga de datos
+
+```{r}
+data <- read_csv("data_cirrosis.csv")
+glimpse(data)
+```
+
+# Regresión lineal aplicada a Bilirrubina
+
+Se utiliza un modelo lineal donde la bilirrubina depende de la edad, albúmina y tiempo de protrombina. Este análisis permite identificar qué factores influyen más en los niveles de bilirrubina.
+
+```{r}
+modelo <- lm(Bilirrubina ~ Edad + Albumina + Tiempo_Protrombina, data = data)
+summary(modelo)
+```
+
+# Diagnóstico del modelo lineal
+
+La validez del modelo se evalúa mediante gráficos de residuos y pruebas formales.
+
+```{r}
+plot(modelo, which = 1)
+```
+
+Normalidad de los residuos:
+
+```{r}
+shapiro.test(residuals(modelo))
+```
+
+Kolmogorov-Smirnov:
+
+```{r}
+lillie.test(residuals(modelo))
+```
+
+Homocedasticidad:
+
+```{r}
+car::ncvTest(modelo)
+```
+
+Independencia:
+
+```{r}
+car::durbinWatsonTest(modelo)
+```
+
+# Regresión logística aplicada al estado vital
+
+Se construye una variable binaria donde 1 representa fallecido y 0 representa vivo o trasplantado.
+
+```{r}
+data <- data %>% mutate(Fallecido = if_else(Estado == "Fallecido", 1, 0))
+table(data$Fallecido)
+```
+
+Modelo logístico:
+
+```{r}
+modelo_log <- glm(Fallecido ~ Edad + Bilirrubina + Albumina,
+                  data = data, family = binomial)
+summary(modelo_log)
+```
+
+Odds Ratios:
+
+```{r}
+exp(coef(modelo_log))
+```
+
+# Curva ROC
+
+```{r}
+prob <- predict(modelo_log, type = "response")
+roc_obj <- roc(data$Fallecido, prob)
+roc_obj
+```
+
+```{r, fig.width=6, fig.height=6}
+plot(roc_obj, main = "Curva ROC - Modelo Logístico")
+```
+
+# Conclusión
+
+El análisis realizado permitió evaluar la relación entre variables clínicas y los niveles de bilirrubina mediante un modelo lineal que mostró tendencias coherentes con la fisiología hepática. La revisión de los residuos y las pruebas de bondad de ajuste indicaron si los supuestos del modelo se cumplían adecuadamente, posteriormente se ajustó un modelo de regresión logística para estimar la probabilidad de fallecimiento, cuyos coeficientes y odds ratios ofrecieron una interpretación clara del riesgo asociado a cada variable. Finalmente, la curva ROC mostró la capacidad predictiva del modelo logístico, evidenciando su utilidad para discriminar entre pacientes fallecidos y no fallecidos, en conjunto, estos análisis permitieron obtener una visión completa del comportamiento de las variables y de la calidad de los modelos estadísticos aplicados.
